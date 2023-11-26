@@ -15,7 +15,10 @@ from datetime import datetime
 
 
 def sync_to_rm(item, zot, folders):
-    temp_path = Path(tempfile.gettempdir())
+    # Create new temporary dir
+    temp_path = tempfile.mkdtemp()
+    
+    # Get all item IDs and attachments, iterate through...
     item_id = item["key"]
     attachments = zot.children(item_id)
     for entry in attachments:
@@ -25,18 +28,23 @@ def sync_to_rm(item, zot, folders):
             print(f"Processing {attachment_name}...")
                 
             # Get actual file and repack it in reMarkable's file format
-            file_name = zot.dump(attachment_id, path=temp_path)
-            if file_name:
-                upload = rmapi.upload_file(file_name, f"/Zotero/{folders['unread']}")
+            temp_filepath = os.path.join(temp_path, attachment_name)
+            with open(temp_filepath, 'wb') as bf:
+                bf.write(zot.file(attachment_id))
+                
+            upload = rmapi.upload_file(temp_filepath, f"/Zotero/{folders['unread']}")
+            
             if upload:
                 zot.add_tags(item, "synced")
-                os.remove(file_name)
+                os.remove(temp_filepath)
                 print(f"Uploaded {attachment_name} to reMarkable.")
             else:
                 print(f"Failed to upload {attachment_name} to reMarkable.")
         else:
             print("Found attachment, but it's not a PDF, skipping...")
-        
+    
+    # Finally, delete entire temp directory (in case there are any files left over) 
+    rmtree(temp_path)
        
 def sync_to_rm_webdav(item, zot, webdav, folders):
     temp_path = Path(tempfile.gettempdir())
