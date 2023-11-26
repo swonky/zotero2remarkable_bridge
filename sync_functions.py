@@ -12,11 +12,49 @@ from webdav3.client import Client as wdClient
 from time import sleep
 from datetime import datetime
 
+class TempDir:
+    def __init__(self):
+        self.path = tempfile.mkdtemp()
+
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, ex_type, ex_value, ex_traceback):
+        self.delete()
+    
+    def delete(self):
+        if os.path.exists(self.path):
+            rmtree(self.path)
+            
+class TempFile:
+    @property
+    def path(self):
+        return os.path.join(self.dir.path, self.file_name)
+    
+    @property
+    def exists(self):
+        return os.path.exists(self.path)
+    
+    def __init__(self, tempdir: TempDir, file_name: str):
+        self.dir = tempdir
+        self.file_name = file_name
+        
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, ex_type, ex_value, ex_traceback):
+        self.delete()
+    
+    def delete(self):
+        if os.path.exists(self.path):
+            os.remove(self.path)
+        
+        
 
 
 def sync_to_rm(item, zot, folders):
     # Create new temporary dir
-    temp_path = tempfile.mkdtemp()
+    temp_dir = TempDir()
     
     # Get all item IDs and attachments, iterate through...
     item_id = item["key"]
@@ -26,25 +64,25 @@ def sync_to_rm(item, zot, folders):
             attachment_id = attachments[attachments.index(entry)]["key"]
             attachment_name = zot.item(attachment_id)["data"]["filename"]
             print(f"Processing {attachment_name}...")
-                
-            # Get actual file and repack it in reMarkable's file format
-            temp_filepath = os.path.join(temp_path, attachment_name)
-            with open(temp_filepath, 'wb') as bf:
-                bf.write(zot.file(attachment_id))
-                
-            upload = rmapi.upload_file(temp_filepath, f"/Zotero/{folders['unread']}")
             
-            if upload:
-                zot.add_tags(item, "synced")
-                os.remove(temp_filepath)
-                print(f"Uploaded {attachment_name} to reMarkable.")
-            else:
-                print(f"Failed to upload {attachment_name} to reMarkable.")
+            # Get actual file and repack it in reMarkable's file format
+            with TempFile(temp_dir, attachment_name) as tf:
+                with open(tf.path, 'wb') as bf:
+                    bf.write(zot.file(attachment_id))
+                
+                if tf.exists:
+                    upload = rmapi.upload_file(tf.path, f"/Zotero/{folders['unread']}")
+            
+                    if upload:
+                        zot.add_tags(item, "synced")
+                        print(f"Uploaded {attachment_name} to reMarkable.")
+                    else:
+                        print(f"Failed to upload {attachment_name} to reMarkable.")
+                else:
+                    print(f"Failed to write {attachment_name} to disk")
         else:
             print("Found attachment, but it's not a PDF, skipping...")
     
-    # Finally, delete entire temp directory (in case there are any files left over) 
-    rmtree(temp_path)
        
 def sync_to_rm_webdav(item, zot, webdav, folders):
     temp_path = Path(tempfile.gettempdir())
